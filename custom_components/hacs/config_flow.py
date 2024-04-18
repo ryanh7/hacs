@@ -107,7 +107,7 @@ class HacsFlowHandler(ConfigFlow, domain=DOMAIN):
                 **{"client_name": f"HACS/{integration.version}"},
             )
             try:
-                response = await self.device.register()
+                response = await self.device.register(scope="repo")
                 self._registration = response.data
             except GitHubException as exception:
                 LOGGER.exception(exception)

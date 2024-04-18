@@ -286,7 +286,7 @@ class AdjustedHacs(HacsBase):
             repositories = [repository_name]
         elif category == "integration":
             # hacs/integration i not in the default file, but it's still needed
-            repositories.append("hacs/integration")
+            repositories.append("ryanh7/hacs")
 
         for repo in repositories:
             if repo in removed:

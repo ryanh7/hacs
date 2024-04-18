@@ -7,6 +7,7 @@ import os
 import pathlib
 import shutil
 import tempfile
+import base64
 from typing import TYPE_CHECKING, Any
 import zipfile
 
@@ -16,6 +17,9 @@ from aiogithubapi import (
     GitHubReleaseModel,
 )
 from aiogithubapi.objects.repository import AIOGitHubAPIRepository
+from aiogithubapi.helpers import repository_full_name
+from aiogithubapi.const import GitHubRequestKwarg, GitHubRequestAcceptHeader
+from aiohttp.hdrs import ACCEPT
 import attr
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 
@@ -653,11 +657,15 @@ class HacsRepository:
         if not ref:
             raise HacsException("Missing required elements.")
 
-        filecontent = await self.hacs.async_download_file(
-            github_archive(repository=self.data.full_name, version=ref, variant="tags"),
-            keep_url=True,
-            nolog=True,
-        )
+        response = await self.hacs.githubapi.repos.zipball(repository=self.data.full_name, ref=ref)
+        filecontent = response.data if response else None
+
+        if filecontent is None:
+            filecontent = await self.hacs.async_download_file(
+                github_archive(repository=self.data.full_name, version=ref, variant="tags"),
+                keep_url=True,
+                nolog=True,
+            )
 
         if filecontent is None:
             filecontent = await self.hacs.async_download_file(
@@ -1336,10 +1344,23 @@ class HacsRepository:
         if version is None:
             return None
 
-        result = await self.hacs.async_download_file(
-            f"https://raw.githubusercontent.com/{self.data.full_name}/{version}/{filename}",
-            nolog=True,
-        )
+        response = await self.hacs.async_github_api_method(
+                method=self.hacs.githubapi.generic,
+                endpoint=f"/repos/{repository_full_name(self.data.full_name)}"
+                f"/contents{f'/{filename}' if filename else ''}",
+                raise_exception=False,
+                **{
+                    GitHubRequestKwarg.HEADERS: {ACCEPT: GitHubRequestAcceptHeader.RAW_JSON},
+                    GitHubRequestKwarg.PARAMS: {'ref': version}
+                },
+            )
+        result = base64.b64decode(response.data.get('content')) if response else None
+        
+        if result is None:
+            result = await self.hacs.async_download_file(
+                f"https://raw.githubusercontent.com/{self.data.full_name}/{version}/{filename}",
+                nolog=True,
+            )
 
         return (
             render_template(
@@ -1357,10 +1378,22 @@ class HacsRepository:
         """Get the hacs.json file of the repository."""
         self.logger.debug("%s Getting hacs.json for version=%s", self.string, version)
         try:
-            result = await self.hacs.async_download_file(
-                f"https://raw.githubusercontent.com/{self.data.full_name}/{version}/hacs.json",
-                nolog=True,
+            response = await self.hacs.async_github_api_method(
+                method=self.hacs.githubapi.generic,
+                endpoint=f"/repos/{repository_full_name(self.data.full_name)}/contents/hacs.json",
+                raise_exception=False,
+                **{
+                    GitHubRequestKwarg.HEADERS: {ACCEPT: GitHubRequestAcceptHeader.RAW_JSON},
+                    GitHubRequestKwarg.PARAMS: {'ref': version}
+                },
             )
+            result = base64.b64decode(response.data.get('content'))  if response else None
+
+            if result is None:
+                result = await self.hacs.async_download_file(
+                    f"https://raw.githubusercontent.com/{self.data.full_name}/{version}/hacs.json",
+                    nolog=True,
+                )
             if result is None:
                 return None
             return HacsManifest.from_dict(json_loads(result))
