@@ -323,4 +323,4 @@ class HacsData:
 
         if entry == HACS_REPOSITORY_ID:
             repository.data.installed_version = self.hacs.version
-            repository.data.installed = True
+            repository.data.installed = False
