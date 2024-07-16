@@ -1354,7 +1354,7 @@ class HacsRepository:
                     GitHubRequestKwarg.PARAMS: {'ref': version}
                 },
             )
-        result = base64.b64decode(response.data.get('content')) if response else None
+        result = response.data if response else None
         
         if result is None:
             result = await self.hacs.async_download_file(
@@ -1365,7 +1365,7 @@ class HacsRepository:
         return (
             render_template(
                 self.hacs,
-                result.decode(encoding="utf-8")
+                result
                 .replace("<svg", "<disabled")
                 .replace("</svg", "</disabled"),
                 self,
