@@ -1237,7 +1237,7 @@ class HacsRepository:
 
         return [
             FileInformation(
-                url=asset.get("browser_download_url"),
+                url=asset.get("url"),
                 path=asset.get("name"),
                 name=asset.get("name"),
             )

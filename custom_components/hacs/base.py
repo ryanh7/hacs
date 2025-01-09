@@ -22,7 +22,9 @@ from aiogithubapi import (
     GitHubRatelimitException,
 )
 from aiogithubapi.objects.repository import AIOGitHubAPIRepository
+from aiogithubapi.const import BASE_API_URL, GitHubRequestKwarg
 from aiohttp.client import ClientSession, ClientTimeout
+from aiohttp.hdrs import ACCEPT
 from awesomeversion import AwesomeVersion
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE, Platform
@@ -721,6 +723,19 @@ class HacsBase:
 
         while timeouts < 5:
             try:
+                if url and url.startswith(BASE_API_URL + "/"):
+                    request = await self.async_github_api_method(
+                        method=self.githubapi.generic,
+                        endpoint=url[len(BASE_API_URL):],
+                        timeout=60,
+                        raise_exception=False,
+                        **{
+                            GitHubRequestKwarg.HEADERS: {ACCEPT: "application/octet-stream"},
+                        },
+                    )
+                    if request and request.status in (200, 302):
+                        return request.data
+
                 request = await self.session.get(
                     url=url,
                     timeout=ClientTimeout(total=60),
