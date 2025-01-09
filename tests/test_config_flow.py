@@ -1,14 +1,15 @@
-from typing import Generator
+import asyncio
+from collections.abc import Generator
 from unittest.mock import patch
 
 from aiogithubapi import GitHubException
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant import config_entries
 from homeassistant.const import CONF_ACCESS_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, UnknownFlow
 import pytest
 
-from custom_components.hacs.base import HacsBase
 from custom_components.hacs.const import DOMAIN
 
 from tests.common import (
@@ -32,6 +33,7 @@ def _mock_setup_entry(hass: HomeAssistant) -> Generator[None, None, None]:
 
 
 async def test_full_user_flow_implementation(
+    time_freezer: FrozenDateTimeFactory,
     hass: HomeAssistant,
     _mock_setup_entry: None,
     response_mocker: ResponseMocker,
@@ -52,16 +54,21 @@ async def test_full_user_flow_implementation(
             headers={"Content-Type": "application/json"},
         ),
     )
+
+    access_token_responses = [
+        # User has not yet entered the code
+        {"error": "authorization_pending"},
+        # User enters the code
+        {CONF_ACCESS_TOKEN: TOKEN, "token_type": "bearer", "scope": ""},
+    ]
+
+    async def json(**kwargs):
+        return access_token_responses.pop(0)
+
     response_mocker.add(
         url="https://github.com/login/oauth/access_token",
         response=MockedResponse(
-            content={
-                CONF_ACCESS_TOKEN: TOKEN,
-                "token_type": "bearer",
-                "scope": "",
-            },
-            headers={"Content-Type": "application/json"},
-        ),
+            json=json, headers={"Content-Type": "application/json"}, keep=True),
     )
 
     result = await hass.config_entries.flow.async_init(
@@ -79,7 +86,6 @@ async def test_full_user_flow_implementation(
             "acc_addons": True,
             "acc_untested": True,
             "acc_disable": False,
-            "experimental": True,
         },
     )
 
@@ -92,21 +98,21 @@ async def test_full_user_flow_implementation(
             "acc_addons": True,
             "acc_untested": True,
             "acc_disable": True,
-            "experimental": True,
         },
     )
 
     assert result["step_id"] == "device"
     assert result["type"] == FlowResultType.SHOW_PROGRESS
 
-    await hass.config_entries.flow.async_configure(result["flow_id"])
+    time_freezer.tick(10)
     await hass.async_block_till_done()
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"])
     assert result["type"] == FlowResultType.CREATE_ENTRY
 
     snapshots.assert_match(
-        safe_json_dumps(recursive_remove_key(result, ("flow_id", "minor_version"))),
+        safe_json_dumps(recursive_remove_key(
+            result, ("flow_id", "minor_version"))),
         "config_flow/test_full_user_flow_implementation.json",
     )
 
@@ -131,11 +137,17 @@ async def test_flow_with_remove_while_activating(
             headers={"Content-Type": "application/json"},
         ),
     )
+
+    access_token_event = asyncio.Event()
+
+    async def json(**kwargs):
+        access_token_event.set()
+        return {"error": "authorization_pending"}
+
     response_mocker.add(
         url="https://github.com/login/oauth/access_token",
         response=MockedResponse(
-            content={"error": "authorization_pending"}, headers={"Content-Type": "application/json"}
-        ),
+            json=json, headers={"Content-Type": "application/json"}, keep=True),
     )
 
     result = await hass.config_entries.flow.async_init(
@@ -153,12 +165,14 @@ async def test_flow_with_remove_while_activating(
             "acc_addons": True,
             "acc_untested": True,
             "acc_disable": True,
-            "experimental": True,
         },
     )
 
     assert result["step_id"] == "device"
     assert result["type"] == FlowResultType.SHOW_PROGRESS
+
+    # Wait for access token request
+    await access_token_event.wait()
 
     assert hass.config_entries.flow.async_get(result["flow_id"])
 
@@ -180,7 +194,8 @@ async def test_flow_with_registration_failure(
     """Test flow with registration failure of the device."""
     response_mocker.add(
         url="https://github.com/login/device/code",
-        response=MockedResponse(exception=GitHubException("Registration failed")),
+        response=MockedResponse(
+            exception=GitHubException("Registration failed")),
     )
 
     result = await hass.config_entries.flow.async_init(
@@ -198,7 +213,6 @@ async def test_flow_with_registration_failure(
             "acc_addons": True,
             "acc_untested": True,
             "acc_disable": True,
-            "experimental": True,
         },
     )
     await hass.async_block_till_done()
@@ -206,12 +220,14 @@ async def test_flow_with_registration_failure(
     assert result["type"] == FlowResultType.ABORT
 
     snapshots.assert_match(
-        safe_json_dumps(recursive_remove_key(result, ("flow_id", "minor_version"))),
+        safe_json_dumps(recursive_remove_key(
+            result, ("flow_id", "minor_version"))),
         "config_flow/test_flow_with_registration_failure.json",
     )
 
 
 async def test_flow_with_activation_failure(
+    time_freezer: FrozenDateTimeFactory,
     hass: HomeAssistant,
     _mock_setup_entry: None,
     response_mocker: ResponseMocker,
@@ -232,9 +248,24 @@ async def test_flow_with_activation_failure(
             headers={"Content-Type": "application/json"},
         ),
     )
+
+    def raise_github_exception() -> None:
+        raise GitHubException("Activation failed")
+
+    access_token_responses = [
+        # User has not yet entered the code
+        lambda: {"error": "authorization_pending"},
+        # Activation fails
+        raise_github_exception,
+    ]
+
+    async def json(**kwargs):
+        return access_token_responses.pop(0)()
+
     response_mocker.add(
         url="https://github.com/login/oauth/access_token",
-        response=MockedResponse(exception=GitHubException("Activation failed")),
+        response=MockedResponse(
+            json=json, headers={"Content-Type": "application/json"}, keep=True),
     )
 
     result = await hass.config_entries.flow.async_init(
@@ -252,12 +283,13 @@ async def test_flow_with_activation_failure(
             "acc_addons": True,
             "acc_untested": True,
             "acc_disable": True,
-            "experimental": True,
         },
     )
 
     assert result["step_id"] == "device"
     assert result["type"] == FlowResultType.SHOW_PROGRESS
+
+    time_freezer.tick(10)
 
     await hass.config_entries.flow.async_configure(result["flow_id"])
     await hass.async_block_till_done()
@@ -265,7 +297,8 @@ async def test_flow_with_activation_failure(
     assert result["type"] == FlowResultType.ABORT
 
     snapshots.assert_match(
-        safe_json_dumps(recursive_remove_key(result, ("flow_id", "minor_version"))),
+        safe_json_dumps(recursive_remove_key(
+            result, ("flow_id", "minor_version"))),
         "config_flow/test_flow_with_activation_failure.json",
     )
 
@@ -277,7 +310,7 @@ async def test_already_configured(
     check_report_issue: None,
 ) -> None:
     """Test we abort if already configured."""
-    config_entry = create_config_entry(data={"experimental": True})
+    config_entry = create_config_entry()
     config_entry.add_to_hass(hass)
 
     result = await hass.config_entries.flow.async_init(
@@ -288,7 +321,8 @@ async def test_already_configured(
 
     assert result["type"] == FlowResultType.ABORT
     snapshots.assert_match(
-        safe_json_dumps(recursive_remove_key(result, ("flow_id", "minor_version"))),
+        safe_json_dumps(recursive_remove_key(
+            result, ("flow_id", "minor_version"))),
         "config_flow/test_already_configured.json",
     )
 
@@ -316,10 +350,7 @@ async def test_options_flow(hass: HomeAssistant, setup_integration: Generator) -
     assert result["data"] == {
         "appdaemon": True,
         "country": "ALL",
-        "debug": False,
         "experimental": True,
-        "netdaemon": True,
-        "release_limit": 5,
         "sidepanel_icon": "hacs:hacs",
         "sidepanel_title": "new_title",
     }
@@ -327,17 +358,18 @@ async def test_options_flow(hass: HomeAssistant, setup_integration: Generator) -
     assert config_entry.options == {
         "appdaemon": True,
         "country": "ALL",
-        "debug": False,
         "experimental": True,
-        "netdaemon": True,
-        "release_limit": 5,
         "sidepanel_icon": "hacs:hacs",
         "sidepanel_title": "new_title",
     }
 
     # Check config entry is reloaded with new options
     await hass.async_block_till_done()
+
     # Get a new HACS instance after reload
     hacs = get_hacs(hass)
     for key, val in config_entry.options.items():
+        if key == "experimental":
+            assert hasattr(hacs.configuration, str(key)) is False
+            continue
         assert getattr(hacs.configuration, str(key)) == val

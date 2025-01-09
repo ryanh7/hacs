@@ -1,4 +1,5 @@
 {
+    "_dashboard_resources": [],
     "_data": {
         "appdaemon": {
             "1296265": {
@@ -23,6 +24,7 @@
                 "last_updated": "2011-01-26T19:06:43Z",
                 "last_version": "1.0.0",
                 "manifest_name": "Proxy manifest",
+                "prerelease": "3.0.0",
                 "published_tags": [
                     "1.0.0"
                 ],
@@ -154,8 +156,7 @@
     "_hacs": {
         "configuration": {
             "debug": false,
-            "dev": true,
-            "experimental": true
+            "dev": true
         },
         "stage": "running",
         "status": {

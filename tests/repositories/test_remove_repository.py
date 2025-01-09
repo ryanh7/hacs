@@ -1,9 +1,11 @@
+from collections.abc import Generator
 import os
 from pathlib import Path
-from typing import Generator
 
 from homeassistant.core import HomeAssistant
 import pytest
+
+from custom_components.hacs.repositories.plugin import HacsPluginRepository
 
 from tests.common import (
     CategoryTestData,
@@ -31,8 +33,22 @@ async def test_remove_repository(
 
     assert len(hacs.repositories.list_downloaded) == 2
 
-    if repo.data.category in ("theme", "python_script"):
-        repo.data.file_name = category_test_data["files"][0]
+
+    match repo.data.category:
+        case "theme" | "python_script":
+            repo.data.file_name = category_test_data["files"][0]
+        case "plugin":
+            repo.data.file_name = category_test_data["files"][0]
+            assert isinstance(repo, HacsPluginRepository)
+            resources = repo._get_resource_handler()
+            assert resources.async_items() == []
+
+            await repo.update_dashboard_resources()
+            repo.update_filenames()
+
+            first_resource = resources.async_items()[0]
+            assert first_resource["url"] == repo.generate_dashboard_resource_url()
+
 
     # workaround for local path bug in tests
     repo.content.path.local = repo.localpath
@@ -42,11 +58,11 @@ async def test_remove_repository(
         Path(repo.localpath, file).touch()
 
     await snapshots.assert_hacs_data(
-        hacs, f"{category_test_data['repository']}/test_remove_repository_pre.json"
+        hacs, f"{category_test_data['repository']}/test_remove_repository_pre.json",
     )
 
     response = await ws_client.send_and_receive_json(
-        "hacs/repository/remove", {"repository": repo.data.id}
+        "hacs/repository/remove", {"repository": repo.data.id},
     )
     assert response["success"] == True
 
@@ -60,5 +76,5 @@ async def test_remove_repository(
         assert not os.path.exists(repo.localpath)
 
     await snapshots.assert_hacs_data(
-        hacs, f"{category_test_data['repository']}/test_remove_repository_post.json"
+        hacs, f"{category_test_data['repository']}/test_remove_repository_post.json",
     )

@@ -1,4 +1,5 @@
 """HACS Data client."""
+
 from __future__ import annotations
 
 import asyncio
@@ -51,7 +52,7 @@ class HacsDataClient:
             response.raise_for_status()
         except HacsNotModifiedException:
             raise
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise HacsException("Timeout of 60s reached") from None
         except Exception as exception:
             raise HacsException(f"Error fetching data from HACS: {exception}") from exception
