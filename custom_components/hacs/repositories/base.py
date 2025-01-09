@@ -1359,17 +1359,14 @@ class HacsRepository:
 
         result = None
         response = await self.hacs.async_github_api_method(
-                method=self.hacs.githubapi.generic,
-                endpoint=f"/repos/{repository_full_name(self.data.full_name)}"
-                f"/contents{f'/{filename}' if filename else ''}",
-                raise_exception=False,
-                **{
-                    GitHubRequestKwarg.HEADERS: {ACCEPT: GitHubRequestAcceptHeader.RAW_JSON},
-                    GitHubRequestKwarg.PARAMS: {'ref': version}
-                },
-            )
+            method=self.hacs.githubapi.repos.contents.get,
+            raise_exception=False,
+            repository=self.data.full_name,
+            path=filename,
+            **{"params": {"ref": target_version}},
+        )
         if response:
-            result = response.data
+            result = decode_content(response.data.content)
         
         if result is None:
             result = await self.hacs.async_download_file(
@@ -1377,9 +1374,11 @@ class HacsRepository:
                     self.data.full_name}/{target_version}/{filename}",
                 nolog=True,
             )
+            if result:
+                result = result.decode(encoding="utf-8")
 
         return (
-            result.decode(encoding="utf-8")
+            result
             .replace("<svg", "<disabled")
             .replace("</svg", "</disabled")
             if result
@@ -1390,31 +1389,11 @@ class HacsRepository:
         """Get the hacs.json file of the repository."""
         self.logger.debug("%s Getting hacs.json for version=%s", self.string, version)
         try:
-            result = None
-            response = await self.hacs.async_github_api_method(
-                method=self.hacs.githubapi.generic,
-                endpoint=f"/repos/{repository_full_name(self.data.full_name)}/contents/hacs.json",
-                raise_exception=False,
-                **{
-                    GitHubRequestKwarg.HEADERS: {ACCEPT: GitHubRequestAcceptHeader.RAW_JSON},
-                    GitHubRequestKwarg.PARAMS: {'ref': version}
-                },
+            result = await self.hacs.async_download_file(
+                f"https://raw.githubusercontent.com/{
+                    self.data.full_name}/{version}/hacs.json",
+                nolog=True,
             )
-            if response:
-                result = base64.b64decode(response.data.get('content'))
-            
-            if result is None:
-                result = await self.hacs.async_download_file(
-                            f"https://raw.githubusercontent.com/{
-                                self.data.full_name}/{version}/hacs.json",
-                            nolog=True,
-                )
-
-            if result is None:
-                result = await self.hacs.async_download_file(
-                    f"https://raw.githubusercontent.com/{self.data.full_name}/{version}/hacs.json",
-                    nolog=True,
-                )
             if result is None:
                 return None
             return HacsManifest.from_dict(json_loads(result))
@@ -1435,7 +1414,7 @@ class HacsRepository:
         if ref == self.data.last_version:
             target_manifest = self.repository_manifest
         else:
-            target_manifest = await self.get_hacs_json(version=ref)
+            target_manifest = HacsManifest.from_dict(await self.async_get_hacs_json(ref=ref))
 
         if target_manifest is None:
             raise HacsException(
