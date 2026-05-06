@@ -37,7 +37,7 @@ from homeassistant.helpers.issue_registry import IssueSeverity, async_create_iss
 from homeassistant.loader import Integration
 from homeassistant.util import dt
 
-from .const import DOMAIN, TV, URL_BASE
+from .const import DOMAIN, HACS_REPOSITORY_ID, TV, URL_BASE
 from .coordinator import HacsUpdateCoordinator
 from .data_client import HacsDataClient
 from .enums import (
@@ -532,6 +532,9 @@ class HacsBase:
         default: bool = False,
     ) -> None:
         """Register a repository."""
+        if repository_id == HACS_REPOSITORY_ID:
+            repository_full_name = HacsGitHubRepo.INTEGRATION
+
         if repository_full_name in self.common.skip:
             if repository_full_name != HacsGitHubRepo.INTEGRATION:
                 raise HacsExpectedException(f"Skipping {repository_full_name}")
@@ -673,6 +676,27 @@ class HacsBase:
 
         self.async_dispatch(HacsDispatchEvent.STATUS, {})
 
+    def _async_download_headers(self, url: str, headers: dict | None = None) -> dict[str, str]:
+        """Create request headers for downloads."""
+        headers = {} if headers is None else dict(headers)
+
+        if (
+            self.configuration.token
+            and not any(name.lower() == "authorization" for name in headers)
+            and any(
+                domain in url
+                for domain in (
+                    "github.com",
+                    "raw.githubusercontent.com",
+                    "codeload.github.com",
+                    "githubusercontent.com",
+                )
+            )
+        ):
+            headers["Authorization"] = f"Bearer {self.configuration.token}"
+
+        return headers
+
     async def async_download_file(
         self,
         url: str,
@@ -689,6 +713,8 @@ class HacsBase:
 
         if not keep_url and "tags/" in url:
             url = url.replace("tags/", "")
+
+        headers = self._async_download_headers(url, headers)
 
         self.log.debug("Trying to download %s", url)
         attempt_count = 0
