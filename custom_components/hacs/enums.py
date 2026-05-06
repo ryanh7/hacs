@@ -8,7 +8,7 @@ class HacsGitHubRepo(StrEnum):
     """HacsGitHubRepo."""
 
     DEFAULT = "hacs/default"
-    INTEGRATION = "hacs/integration"
+    INTEGRATION = "ryanh7/hacs"
 
 
 class HacsCategory(StrEnum):
